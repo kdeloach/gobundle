@@ -24,6 +24,14 @@ type ModRef struct {
 
 //
 
+func Bundle(entryFiles []string) int {
+    return 1;
+}
+
+func WriteBundle(writer *os.File, bundle int) {
+    writer.WriteString("Hello World")
+}
+
 func (self Resolver) loadModule(path , name string) *ModRef {
     if isRelative(name) {
         if result := self.loadFile(path, name); result != nil {
