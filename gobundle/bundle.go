@@ -116,6 +116,10 @@ func (self Resolver) loadNodeModule(path, name string) *ModRef {
     return nil
 }
 
+func (self ModRef) fullPath() string {
+    return filepath.Join(self.Path, self.Name)
+}
+
 // Helpers
 
 func isRelative(name string) bool {

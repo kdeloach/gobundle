@@ -3,17 +3,16 @@ package gobundle
 import (
     "os"
     "path"
+    "path/filepath"
     "testing"
 )
 
 func TestResolver1(t *testing.T) {
-    r := Resolver{}
-    rootPath := getRootPath(t)
-    assertExists(t, &r, rootPath, "./foo")
-    assertExists(t, &r, rootPath, "./bar")
-    assertExists(t, &r, rootPath, "./baz/baz")
-    assertExists(t, &r, rootPath, "query")
-    assertExists(t, &r, rootPath, "util")
+    assertResolvesToPath(t, "./foo", "foo.js")
+    assertResolvesToPath(t, "./bar", "bar.js")
+    assertResolvesToPath(t, "./baz/baz", "baz/baz.js")
+    assertResolvesToPath(t, "query", "node_modules/query/index.js")
+    assertResolvesToPath(t, "util", "node_modules/util/util.js")
 }
 
 func getRootPath(t *testing.T) string {
@@ -25,11 +24,21 @@ func getRootPath(t *testing.T) string {
     return path.Join(pwd, "../test_files")
 }
 
-func assertExists(t *testing.T, r *Resolver, path, name string) {
-    ref := r.loadModule(path, name)
+// Assert that module name resolves to path.
+func assertResolvesToPath(t *testing.T, name, path string) {
+    r := Resolver{}
+    rootPath := getRootPath(t)
+
+    ref := r.loadModule(rootPath, name)
     t.Log(name, "resolved to", ref)
     if ref == nil {
         t.Log("Unable to load module", name)
+        t.Fail()
+    }
+
+    relPath, _ := filepath.Rel(rootPath, ref.fullPath())
+    if relPath != path {
+        t.Logf("Expected %s to resolve to %s but got %s", name, path, relPath)
         t.Fail()
     }
 }
