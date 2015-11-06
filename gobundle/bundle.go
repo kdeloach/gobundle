@@ -1,11 +1,13 @@
 package gobundle
 
 import (
+    "bufio"
     "encoding/json"
     "io/ioutil"
     "log"
     "os"
     "path/filepath"
+    "regexp"
     "strings"
 )
 
@@ -22,6 +24,13 @@ type ModRef struct {
     Path, Name string
 }
 
+var RequireStmt = regexp.MustCompile(`` +
+        `(?i)` +        // Set case-insensitive flag
+        `require\(` +
+        `(?:"|')` +     // Single or double quote non-capture group
+        `([a-z0-9\./\\-]+)` +
+        `(?:"|')` +     // Single or double quote non-capture group
+        `\)`)
 //
 
 func Bundle(entryFiles []string) int {
@@ -118,6 +127,27 @@ func (self Resolver) loadNodeModule(path, name string) *ModRef {
 
 func (self ModRef) fullPath() string {
     return filepath.Join(self.Path, self.Name)
+}
+
+// Return (non-recursive) list of referenced modules.
+func (self ModRef) parseDeps() []string {
+    fp, _ := os.Open(self.fullPath())
+    defer fp.Close()
+
+    scanner := bufio.NewScanner(bufio.NewReader(fp))
+    scanner.Split(bufio.ScanLines)
+
+    result := []string{}
+    for scanner.Scan() {
+        matches := RequireStmt.FindAllStringSubmatch(scanner.Text(), -1)
+        for _, match := range matches {
+            // Skip first match (entire unmatched line).
+            for _, moduleName := range match[1:] {
+                result = append(result, moduleName)
+            }
+        }
+    }
+    return result
 }
 
 // Helpers

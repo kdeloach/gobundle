@@ -15,6 +15,14 @@ func TestResolver1(t *testing.T) {
     assertResolvesToPath(t, "util", "node_modules/util/util.js")
 }
 
+func TestParser1(t *testing.T) {
+    assertDepsMatch(t, "./foo", []string{"query", "bar.js"})
+    assertDepsMatch(t, "./bar", []string{"util", "baz/baz.js"})
+    assertDepsMatch(t, "./baz/baz", []string{"util"})
+    assertDepsMatch(t, "query", []string{"../util"})
+    assertDepsMatch(t, "util", []string{})
+}
+
 func getRootPath(t *testing.T) string {
     pwd, err := os.Getwd()
     if err != nil {
@@ -41,4 +49,29 @@ func assertResolvesToPath(t *testing.T, name, path string) {
         t.Logf("Expected %s to resolve to %s but got %s", name, path, relPath)
         t.Fail()
     }
+}
+
+func assertDepsMatch(t *testing.T, name string, deps []string) {
+    r := Resolver{}
+    rootPath := getRootPath(t)
+
+    ref := r.loadModule(rootPath, name)
+    actualDeps := ref.parseDeps()
+
+    for _, dep := range deps {
+        if !contains(actualDeps, dep) {
+            t.Logf("Expected %s to have dependency %s", name, dep)
+            t.Fail()
+        }
+    }
+}
+
+// Source: http://stackoverflow.com/questions/10485743/contains-method-for-a-slice
+func contains(haystack []string, needle string) bool {
+    for _, a := range haystack {
+        if a == needle {
+            return true
+        }
+    }
+    return false
 }
