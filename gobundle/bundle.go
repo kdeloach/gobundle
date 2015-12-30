@@ -3,11 +3,13 @@ package gobundle
 import (
     "bufio"
     "encoding/json"
+    "io"
     "io/ioutil"
     "log"
     "os"
     "path/filepath"
     "regexp"
+    "strconv"
     "strings"
 )
 
@@ -18,10 +20,17 @@ type NpmPackage struct {
 }
 
 type Resolver struct {
+    Path string
 }
 
 type ModRef struct {
     Path, Name string
+}
+
+type ModRefGraph struct {
+    RootPath string
+    EntryFile string
+    Nodes map[string][][]string
 }
 
 var RequireStmt = regexp.MustCompile(`` +
@@ -31,17 +40,96 @@ var RequireStmt = regexp.MustCompile(`` +
         `([a-z0-9\./\\-]+)` +
         `(?:"|')` +     // Single or double quote non-capture group
         `\)`)
+
 //
 
-func Bundle(entryFiles []string) int {
-    return 1;
+func Bundle(entryFile string) ModRefGraph {
+    rootPath := filepath.Dir(entryFile)
+    r := Resolver{Path: rootPath}
+    modPath := r.relPath(entryFile)
+    return r.graph(rootPath, modPath)
 }
 
-func WriteBundle(writer *os.File, bundle int) {
-    writer.WriteString("Hello World")
+func WriteBundle(b *os.File, bundle ModRefGraph) {
+    r := Resolver{Path: bundle.RootPath}
+
+    id := makeIdFunc()
+
+    b.WriteString("(function(L, entry) {")
+    b.WriteString(    "var cache = {};")
+    b.WriteString(    "function run(id) {")
+    b.WriteString(        "if (cache[id]) return cache[id];")
+    b.WriteString(        "var m = {exports:{}},")
+    b.WriteString(            "fn = L[id][0],")
+    b.WriteString(            "deps = L[id][1];")
+    b.WriteString(        "function require(name) {")
+    b.WriteString(            "return run(deps[name]);")
+    b.WriteString(        "}")
+    b.WriteString(        "cache[id] = m.exports;");
+    b.WriteString(        "fn(require, m, m.exports);");
+    b.WriteString(        "return m.exports;");
+    b.WriteString(    "}")
+    b.WriteString(    "run(entry);")
+    b.WriteString("}(")
+
+    i := 0
+    b.WriteString("{")
+    log.Println(bundle.Nodes)
+    // TODO: Filter list beforehand
+    for path, children := range bundle.Nodes {
+        // TODO: Investigate why empty/nil children are being added here.
+        // NOTE: Comma appears at the tail end of list if null entry is last
+        if len(path) == 0 {
+            continue
+        }
+
+        modRef := r.loadModule(path)
+        if modRef == nil {
+            log.Panic("Unable to load module at", path)
+        }
+
+        b.WriteString(strconv.Itoa(id(path)))
+        b.WriteString(":[")
+        b.WriteString("function(require,module,exports){")
+        modRef.writeContents(b)
+        b.WriteString("},")
+
+        b.WriteString("{")
+        for j, pathTuple := range children {
+            childPath := pathTuple[0]
+            childRelPath := pathTuple[1]
+            b.WriteString("'")
+            b.WriteString(childPath)
+            b.WriteString("':")
+            b.WriteString(strconv.Itoa(id(childRelPath)))
+            if j < len(children) - 1 {
+                b.WriteString(",")
+            }
+        }
+        b.WriteString("}")
+
+        b.WriteString("]")
+        if i < len(bundle.Nodes) - 1 {
+            b.WriteString(",")
+        }
+        i++
+    }
+    b.WriteString("},")
+    b.WriteString(strconv.Itoa(id(bundle.EntryFile)))
+    b.WriteString("));\n")
 }
 
-func (self Resolver) loadModule(path , name string) *ModRef {
+//
+
+func (self Resolver) loadModule(name string) *ModRef {
+    return self.loadModuleRelativeTo(self.Path, name)
+}
+
+func (self Resolver) loadModuleRelativeTo(path, name string) *ModRef {
+    log.Println("Trying to load", name, "from", path)
+    // NOTE: This important to prevent the case where you have a file name
+    // that matches an NPM module. (Ex. you have "shim/jquery.js" which
+    // requires "jquery")
     if isRelative(name) {
         if result := self.loadFile(path, name); result != nil {
             return result
@@ -70,22 +158,22 @@ func loadPackage(path string) (*NpmPackage, error) {
 }
 
 func (self Resolver) loadFile(path , name string) *ModRef {
-    file := filepath.Join(path, name)
-    log.Println("Trying", file)
+    dir := filepath.Dir(filepath.Join(path, name))
+    base := filepath.Base(name)
+
+    file := filepath.Join(dir, base)
     if exists(file) {
-        return &ModRef{Path: path, Name: name}
+        return &ModRef{Path: dir, Name: base}
     }
 
-    file = filepath.Join(path, name + ".js")
-    log.Println("Trying", file)
+    file = filepath.Join(dir, base + ".js")
     if exists(file) {
-        return &ModRef{Path: path, Name: name + ".js"}
+        return &ModRef{Path: dir, Name: base + ".js"}
     }
 
-    file = filepath.Join(path, name + ".json")
-    log.Println("Trying", file)
+    file = filepath.Join(dir, base + ".json")
     if exists(file) {
-        return &ModRef{Path: path, Name: name + ".json"}
+        return &ModRef{Path: dir, Name: base + ".json"}
     }
 
     return nil
@@ -97,24 +185,31 @@ func (self Resolver) loadFolder(path, name string) *ModRef {
     if exists(pkgFile) {
         pkg, err := loadPackage(pkgFile)
         if err != nil {
-            log.Panic("Invalid package.json format", pkgFile)
+            log.Panic("Invalid package.json format ", pkgFile)
         }
         if len(pkg.Main) > 0 {
             return self.loadFile(dirPath, pkg.Main)
         }
     }
-    if exists(filepath.Join(dirPath, "index.js")) {
+
+    file := filepath.Join(dirPath, "index.js")
+    if exists(file) {
         return &ModRef{Path: dirPath, Name: "index.js"}
     }
-    if exists(filepath.Join(dirPath, "index.json")) {
+
+    file = filepath.Join(dirPath, "index.json")
+    if exists(file) {
         return &ModRef{Path: dirPath, Name: "index.json"}
     }
+
     return nil
 }
 
 func (self Resolver) loadNodeModule(path, name string) *ModRef {
-    dirPaths := nodeModulePaths(path)
+    absPath, _ := filepath.Abs(path)
+    dirPaths := nodeModulePaths(absPath)
     for _, dirPath := range dirPaths {
+        log.Println("Trying to load NPM module", name, "from", path)
         if result := self.loadFile(dirPath, name); result != nil {
             return result
         }
@@ -125,19 +220,59 @@ func (self Resolver) loadNodeModule(path, name string) *ModRef {
     return nil
 }
 
+func (self Resolver) graph(rootPath, modPath string) ModRefGraph {
+    result := ModRefGraph{
+        RootPath: rootPath,
+        EntryFile: modPath,
+        Nodes: make(map[string][][]string),
+    }
+    self.graph2(result, self.Path, modPath)
+    return result
+}
+
+func (self Resolver) graph2(result ModRefGraph, relPath, modPath string) *ModRef {
+    modRef := self.loadModuleRelativeTo(relPath, modPath)
+    if modRef == nil {
+        log.Panic("Could not load module: ", modPath, " from ", relPath)
+    }
+
+    k := self.relPath(modRef.fullPath())
+
+    if _, exists := result.Nodes[k]; !exists {
+        children := modRef.parse()
+        // Placeholder to prevent recursive loops.
+        // Note: Do we need this if graph never allows for cyclical deps?
+        result.Nodes[k] = nil
+        childPaths := make([][]string, 0)
+        for _, childPath := range children {
+            childRef := self.graph2(result, modRef.Path, childPath)
+            childRelPath := self.relPath(childRef.fullPath())
+            childPaths = append(childPaths, []string{childPath, childRelPath})
+        }
+        result.Nodes[k] = childPaths
+    }
+    return modRef
+}
+
+func (self Resolver) relPath(path string) string {
+    result, _ := filepath.Rel(self.Path, path)
+    return result
+}
+
 func (self ModRef) fullPath() string {
     return filepath.Join(self.Path, self.Name)
 }
 
-// Return (non-recursive) list of referenced modules.
-func (self ModRef) parseDeps() []string {
+// Return map of {moduleName: path, ...} for all dependencies referenced
+// by this module.
+func (self ModRef) parse() []string {
     fp, _ := os.Open(self.fullPath())
     defer fp.Close()
 
     scanner := bufio.NewScanner(bufio.NewReader(fp))
     scanner.Split(bufio.ScanLines)
 
-    result := []string{}
+    result := make([]string, 0)
     for scanner.Scan() {
         matches := RequireStmt.FindAllStringSubmatch(scanner.Text(), -1)
         for _, match := range matches {
@@ -148,6 +283,12 @@ func (self ModRef) parseDeps() []string {
         }
     }
     return result
+}
+
+func (self ModRef) writeContents(writer *os.File) {
+    fp, _ := os.Open(self.fullPath())
+    defer fp.Close()
+    io.Copy(writer, fp)
 }
 
 // Helpers

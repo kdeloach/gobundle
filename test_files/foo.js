@@ -1,2 +1,3 @@
 require('query');
-require('bar.js');
+var b = require('./bar');
+console.log('foo');

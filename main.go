@@ -10,7 +10,7 @@ import (
 const Version = "0.1"
 const Usage = `
 Usage:
-  main <entry_file>... [-o <file>|--output=<file>]
+  main <entry_file> [-o <file>|--output=<file>]
   main (-h | --help)
   main --version
 Options:
@@ -21,9 +21,8 @@ Options:
 
 func main() {
     args, _ := docopt.Parse(Usage, nil, true, Version, false)
-    log.Println(args)
 
-    entryFiles := args["<entry_file>"].([]string)
+    entryFile := args["<entry_file>"].(string)
 
     outputFile, ok := args["--output"].(string)
     if !ok {
@@ -40,6 +39,6 @@ func main() {
         writer = fp
     }
 
-    bundle := gobundle.Bundle(entryFiles)
+    bundle := gobundle.Bundle(entryFile)
     gobundle.WriteBundle(writer, bundle)
 }
