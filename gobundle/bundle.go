@@ -44,8 +44,12 @@ var RequireStmt = regexp.MustCompile(`` +
 //
 
 func Bundle(entryFile string) ModRefGraph {
+    absPath, _ := filepath.Abs(entryFile)
+    entryFile = absPath
+
     rootPath := filepath.Dir(entryFile)
     r := Resolver{Path: rootPath}
+
     modPath := r.relPath(entryFile)
     return r.graph(rootPath, modPath)
 }
@@ -73,7 +77,8 @@ func WriteBundle(b *os.File, bundle ModRefGraph) {
     b.WriteString("}(")
 
     i := 0
-    b.WriteString("{")
+    b.WriteString("{\n")
+    log.Println("entryFile=" + bundle.EntryFile)
     log.Println(bundle.Nodes)
     // TODO: Filter list beforehand
     for path, children := range bundle.Nodes {
@@ -85,7 +90,7 @@ func WriteBundle(b *os.File, bundle ModRefGraph) {
 
         modRef := r.loadModule(path)
         if modRef == nil {
-            log.Panic("Unable to load module at", path)
+            log.Panic("Unable to load module at ", path)
         }
 
         b.WriteString(strconv.Itoa(id(path)))
@@ -112,6 +117,7 @@ func WriteBundle(b *os.File, bundle ModRefGraph) {
         if i < len(bundle.Nodes) - 1 {
             b.WriteString(",")
         }
+        b.WriteString("\n")
         i++
     }
     b.WriteString("},")
@@ -130,14 +136,14 @@ func (self Resolver) loadModuleRelativeTo(path, name string) *ModRef {
     // NOTE: This important to prevent the case where you have a file name
     // that matches an NPM module. (Ex. you have "shim/jquery.js" which
     // requires "jquery")
-    if isRelative(name) {
+    //if isRelative(name) {
         if result := self.loadFile(path, name); result != nil {
             return result
         }
         if result := self.loadFolder(path, name); result != nil {
             return result
         }
-    }
+    //}
     if result := self.loadNodeModule(path, name); result != nil {
         return result
     }
@@ -237,6 +243,9 @@ func (self Resolver) graph2(result ModRefGraph, relPath, modPath string) *ModRef
     }
 
     k := self.relPath(modRef.fullPath())
+    if len(k) == 0 {
+        log.Println(modRef)
+    }
 
     if _, exists := result.Nodes[k]; !exists {
         children := modRef.parse()
@@ -288,7 +297,13 @@ func (self ModRef) parse() []string {
 func (self ModRef) writeContents(writer *os.File) {
     fp, _ := os.Open(self.fullPath())
     defer fp.Close()
-    io.Copy(writer, fp)
+    if strings.HasSuffix(self.Name, ".json") {
+        writer.WriteString("module.exports=")
+        io.Copy(writer, fp)
+        writer.WriteString(";")
+    } else {
+        io.Copy(writer, fp)
+    }
 }
 
 // Helpers
@@ -308,8 +323,11 @@ func exists(path string) bool {
 
 func nodeModulePaths(path string) []string {
     result := []string{}
-    for ; len(path) > 1; path = filepath.Dir(path) {
+    prevPath := ""
+    for ; path != prevPath; {
         result = append(result, filepath.Join(path, "node_modules"))
+        prevPath = path
+        path = filepath.Dir(path)
     }
     return result
 }
