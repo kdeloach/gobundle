@@ -89,7 +89,7 @@ func WriteBundle(b *os.File, bundle ModRefGraph) {
 
         modRef := r.loadModule(path)
         if modRef == nil {
-            log.Panic("Unable to load module at", path)
+            log.Panic("Unable to load module at ", path)
         }
 
         b.WriteString(strconv.Itoa(id(path)))
@@ -292,7 +292,13 @@ func (self ModRef) parse() []string {
 func (self ModRef) writeContents(writer *os.File) {
     fp, _ := os.Open(self.fullPath())
     defer fp.Close()
-    io.Copy(writer, fp)
+    if strings.HasSuffix(self.Name, ".json") {
+        writer.WriteString("module.exports=")
+        io.Copy(writer, fp)
+        writer.WriteString(";")
+    } else {
+        io.Copy(writer, fp)
+    }
 }
 
 // Helpers
