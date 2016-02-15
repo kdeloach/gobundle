@@ -10,9 +10,9 @@ import (
 const Version = "0.1"
 const Usage = `
 Usage:
-  main <entry_file> [-o <file>|--output=<file>]
-  main (-h | --help)
-  main --version
+  gobundle <entry_file> [-o <file>|--output=<file>]
+  gobundle (-h | --help)
+  gobundle --version
 Options:
   <entry_file>                Entry file.
   -o <file> --output=<file>   Output file.
