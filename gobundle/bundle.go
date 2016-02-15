@@ -44,8 +44,12 @@ var RequireStmt = regexp.MustCompile(`` +
 //
 
 func Bundle(entryFile string) ModRefGraph {
+    absPath, _ := filepath.Abs(entryFile)
+    entryFile = absPath
+
     rootPath := filepath.Dir(entryFile)
     r := Resolver{Path: rootPath}
+
     modPath := r.relPath(entryFile)
     return r.graph(rootPath, modPath)
 }
@@ -308,8 +312,11 @@ func exists(path string) bool {
 
 func nodeModulePaths(path string) []string {
     result := []string{}
-    for ; len(path) > 1; path = filepath.Dir(path) {
+    prevPath := ""
+    for ; path != prevPath; {
         result = append(result, filepath.Join(path, "node_modules"))
+        prevPath = path
+        path = filepath.Dir(path)
     }
     return result
 }
